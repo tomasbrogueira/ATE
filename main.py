@@ -11,6 +11,11 @@ from region_finder import (
     find_best_rectangle
 )
 
+from hexagonal_test import (
+    generate_hexagonal_prism_points,
+    get_hexagonal_prism_polytope
+)
+
 def plot_branch_currents(branch_currents, rates, m):
     for idx, (branch, current) in enumerate(branch_currents.items()):
         plt.figure()
@@ -199,6 +204,49 @@ def main():
     else:
         print("No feasible points to visualize.")
     return lower_best, upper_best, best_count
+
+
+def hexagonal_prism_test():
+    # Parameters for the hexagonal prism
+    SIDE_LENGTH_PRISM = 1.0
+    Z_MIN_PRISM = 0.0
+    Z_MAX_PRISM = 2.0
+    NUM_POINTS_PRISM = 500
+    NUM_RECTANGLES= 1000
+    SEED_PRISM = 42
+
+    print("\n--- Running Hexagonal Prism Test ---")
+    print(f"Generating {NUM_POINTS_PRISM} points for a hexagonal prism with side {SIDE_LENGTH_PRISM}, z-range [{Z_MIN_PRISM}, {Z_MAX_PRISM}], seed {SEED_PRISM}")
+    X_hist = generate_hexagonal_prism_points(NUM_POINTS_PRISM, SIDE_LENGTH_PRISM, Z_MIN_PRISM, Z_MAX_PRISM, seed=SEED_PRISM)
+    m = X_hist.shape[0]
+    k = m  # All generated points are feasible by construction
+    print(f"Total generated points for prism: {m}, Feasible: {k}")
+
+    # Build prism polytope
+    A_p, b_p = get_hexagonal_prism_polytope(SIDE_LENGTH_PRISM, Z_MIN_PRISM, Z_MAX_PRISM)
+    print(f"Prism polytope: A shape {A_p.shape}, b shape {b_p.shape}")
+
+    # Compute bounds
+    true_min_p, true_max_p = compute_true_bounds(A_p, b_p)
+    print("Prism true bounds per dimension:")
+    print("  min:", np.round(true_min_p, 3))
+    print("  max:", np.round(true_max_p, 3))
+
+    # Random rectangles
+    rects_p = generate_random_rectangles(A_p, b_p, n_rectangles=NUM_RECTANGLES, X_hist=X_hist)
+    print(f"Generated {len(rects_p)} candidate rectangles for prism")
+
+    best_idx_p, (lower_p, upper_p), best_count_p = find_best_rectangle(X_hist, rects_p)
+    print(f"Best prism rectangle index: {best_idx_p}")
+    print(f"Points inside best prism rectangle: {best_count_p}")
+    print("Best prism lower bounds:", np.round(lower_p, 3))
+    print("Best prism upper bounds:", np.round(upper_p, 3))
+
+    # Visualize prism region
+    if X_hist.shape[1] >= 3:
+        plot_feasible_region_3d(X_hist, lower_p, upper_p)
+    plot_feasible_region(X_hist, lower_p, upper_p)
+
 
 if __name__ == "__main__":
     main()

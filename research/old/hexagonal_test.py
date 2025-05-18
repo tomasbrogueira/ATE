@@ -1,34 +1,9 @@
 import numpy as np
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D # Required for 3D plotting
 
 def get_hexagonal_prism_polytope(side_length, z_min, z_max):
-    """
-    Generates the A, b matrices for a hexagonal prism Ax <= b.
-    The hexagon lies in the XY plane, centered at the origin, with two sides parallel to the X-axis.
-    The prism is extruded along the Z-axis.
-
-    Args:
-        side_length (float): The length of a side of the hexagon.
-        z_min (float): The minimum z-coordinate of the prism.
-        z_max (float): The maximum z-coordinate of the prism.
-
-    Returns:
-        tuple: (A_prism, b_prism)
-            A_prism (np.ndarray): Matrix A of shape (8, 3).
-            b_prism (np.ndarray): Vector b of shape (8,).
-    """
     s = side_length
     sqrt3 = np.sqrt(3)
-
-    # Inequalities for the hexagon in the XY plane (Ax_hex * [x, y]^T <= b_hex)
-    # 1. y <= s*sqrt3/2
-    # 2. y >= -s*sqrt3/2  => -y <= s*sqrt3/2
-    # 3. sqrt3*x + y <= s*sqrt3
-    # 4. sqrt3*x - y <= s*sqrt3
-    # 5. -sqrt3*x + y <= s*sqrt3
-    # 6. -sqrt3*x - y <= s*sqrt3
-    A_hex_coeffs = np.array([
+    A_hex = np.array([
         [0, 1],
         [0, -1],
         [sqrt3, 1],
@@ -36,8 +11,7 @@ def get_hexagonal_prism_polytope(side_length, z_min, z_max):
         [-sqrt3, 1],
         [-sqrt3, -1]
     ], dtype=float)
-
-    b_hex_coeffs = np.array([
+    b_hex = np.array([
         s * sqrt3 / 2,
         s * sqrt3 / 2,
         s * sqrt3,
@@ -45,81 +19,37 @@ def get_hexagonal_prism_polytope(side_length, z_min, z_max):
         s * sqrt3,
         s * sqrt3
     ], dtype=float)
-
-    # Combine with Z-axis constraints for the prism
     A_prism = np.zeros((8, 3), dtype=float)
-    A_prism[:6, :2] = A_hex_coeffs  # Hexagon constraints
-    A_prism[6, 2] = 1               # z <= z_max
-    A_prism[7, 2] = -1              # -z <= -z_min  (i.e., z >= z_min)
-
+    A_prism[:6, :2] = A_hex
+    A_prism[6, 2] = 1
+    A_prism[7, 2] = -1
     b_prism = np.zeros(8, dtype=float)
-    b_prism[:6] = b_hex_coeffs
+    b_prism[:6] = b_hex
     b_prism[6] = z_max
     b_prism[7] = -z_min
-    
     return A_prism, b_prism
 
 def generate_hexagonal_prism_points(num_points, side_length, z_min, z_max, seed=None):
-    """
-    Generates uniformly distributed random points within a hexagonal prism.
-
-    Args:
-        num_points (int): The number of points to generate.
-        side_length (float): The length of a side of the hexagon.
-        z_min (float): The minimum z-coordinate of the prism.
-        z_max (float): The maximum z-coordinate of the prism.
-        seed (int, optional): Random seed for reproducibility.
-
-    Returns:
-        np.ndarray: Array of points of shape (num_points, 3).
-    """
     if seed is not None:
         np.random.seed(seed)
-
     s = side_length
-    h_hex = s * np.sqrt(3) / 2  # Max y-extent of the hexagon (half-height)
-
-    # Get hexagon definition for point checking (Ax_hex * [x,y]^T <= b_hex)
-    A_prism_def, b_prism_def = get_hexagonal_prism_polytope(side_length, z_min, z_max)
-    A_hex_coeffs = A_prism_def[:6, :2]
-    b_hex_coeffs = b_prism_def[:6]
-
+    h_hex = s * np.sqrt(3) / 2
+    A_prism, b_prism = get_hexagonal_prism_polytope(side_length, z_min, z_max)
+    A_hex = A_prism[:6, :2]
+    b_hex = b_prism[:6]
     X_hist_prism = []
-    
-    # Rejection sampling parameters
-    # Bounding box for sampling: x in [-s, s], y in [-h_hex, h_hex]
-    # Theoretical acceptance rate: Area_hexagon / Area_bounding_rectangle_xy
-    # Area_hexagon = (3 * sqrt(3) / 2) * s^2
-    # Area_bounding_rectangle_xy = (2*s) * (2*h_hex) = (2*s) * (s*sqrt(3)) = 2*sqrt(3)*s^2
-    # Acceptance rate = (1.5 * sqrt(3)) / (2 * sqrt(3)) = 1.5 / 2 = 0.75
-    # So, expect to need num_points / 0.75 attempts.
-    max_attempts_factor = 5 # Generous factor, e.g. 5 times the expected number of attempts
-    max_total_attempts = int(num_points / 0.75 * max_attempts_factor) 
-    current_attempts = 0
-
-    while len(X_hist_prism) < num_points and current_attempts < max_total_attempts:
-        current_attempts +=1
-        # Sample (x,y) from the bounding box of the hexagon
+    max_attempts = int(num_points / 0.75 * 5)
+    attempts = 0
+    while len(X_hist_prism) < num_points and attempts < max_attempts:
+        attempts += 1
         px = np.random.uniform(-s, s)
         py = np.random.uniform(-h_hex, h_hex)
-        
         point_xy = np.array([px, py])
-        is_in_hexagon = True
-        # Check if the point (px, py) is inside the hexagon using Ax <= b
-        for i in range(A_hex_coeffs.shape[0]):
-            # Add a small epsilon for floating point comparisons
-            if np.dot(A_hex_coeffs[i], point_xy) > b_hex_coeffs[i] + 1e-9:
-                is_in_hexagon = False
-                break
-        
-        if is_in_hexagon:
-            # If in hexagon, sample z uniformly within the prism's height
+        if all(np.dot(A_hex[i], point_xy) <= b_hex[i] + 1e-9 for i in range(6)):
             pz = np.random.uniform(z_min, z_max)
             X_hist_prism.append([px, py, pz])
-
     if len(X_hist_prism) < num_points:
-        print(f"Warning: Generated {len(X_hist_prism)} points out of {num_points} requested after {max_total_attempts} attempts.")
-        
+        print(f"Warning: Generated {len(X_hist_prism)} points out of {num_points} requested after {max_attempts} attempts.")
     return np.array(X_hist_prism)
 
 if __name__ == "__main__":
