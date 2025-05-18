@@ -158,6 +158,28 @@ def compute_true_bounds(A, b):
 # 4) Find best rectangle from random sampling
 # -----------------------------------------------------------------------------
 
+def generate_rectangles_from_polytope(A, b, n_rectangles, dim, random_state=None):
+    """
+    Create n_rectangles axis-aligned boxes by picking random directions w in R^dim,
+    then finding the min/max points of the polytope along w.
+    Returns a list of (lo, hi) pairs.
+    """
+    rng = np.random.default_rng(random_state)
+    rectangles = []
+    for _ in range(n_rectangles):
+        # pick a random direction on the unit sphere
+        w = rng.normal(size=dim)
+        w /= np.linalg.norm(w)
+        # minimize w^T x
+        res_min = linprog(c=w, A_ub=A, b_ub=b, bounds=[(None, None)]*dim)
+        # maximize w^T x  ⇔ minimize −w^T x
+        res_max = linprog(c=-w, A_ub=A, b_ub=b, bounds=[(None, None)]*dim)
+        if res_min.success and res_max.success:
+            lo = res_min.x
+            hi = res_max.x
+            rectangles.append((np.minimum(lo, hi), np.maximum(lo, hi)))
+    return rectangles
+
 def generate_random_rectangles(A, b, n_rectangles=10000, X_hist=None):
     """
     Generate candidate axis-aligned rectangles by sampling pairs of feasible points.
