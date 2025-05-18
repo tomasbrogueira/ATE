@@ -104,7 +104,7 @@ def build_A_b_from_Y(Y, branch_list, rates):
     return A, b
 
 # --------------------------------------------------------------------------
-# 3) Filter historical points that are feasible (no branch violation)
+# 3) Filter historical points that are feasible and define allowed reasgion
 # --------------------------------------------------------------------------
 def filter_feasible_points(Ii, A, b):
     """
@@ -116,104 +116,102 @@ def filter_feasible_points(Ii, A, b):
     X_hist = X_all[feas_mask]
     return X_hist, X_hist.shape[0]
 
-# -----------------------------------------------------------------------------
-# 4) Generate random axis-aligned hyperrectangles that respect A x <= b
-# -----------------------------------------------------------------------------
-def compute_true_bounds(A, b, empirical_min=None, empirical_max=None):
+def compute_true_bounds(A, b):
     """
-    Compute axis-aligned bounds of {x | A x <= b} via LP per dimension.
-    Falls back to empirical_min/empirical_max if unbounded.
-
-    Args:
-        A (ndarray): constraint matrix
-        b (ndarray): RHS vector
-        empirical_min (ndarray): fallback mins
-        empirical_max (ndarray): fallback maxs
-
+    Compute axis-aligned bounds of {x | A x <= b} by LP per dimension.
     Returns:
-        min_vals (ndarray), max_vals (ndarray)
+      • min_vals, max_vals: ndarrays length n
     """
     n = A.shape[1]
     min_vals = np.zeros(n)
     max_vals = np.zeros(n)
     bounds = [(None, None)] * n
     for j in range(n):
+        # Minimize x_j
         c = np.zeros(n)
         c[j] = 1
         res_min = linprog(c, A_ub=A, b_ub=b, bounds=bounds, method='highs')
-        res_max = linprog(-c, A_ub=A, b_ub=b, bounds=bounds, method='highs')
-        if res_min.success and res_max.success:
+        
+        if res_min.success:
             min_vals[j] = res_min.fun
-            max_vals[j] = -res_max.fun
+        elif res_min.status == 3:  # Problem is unbounded
+            min_vals[j] = -np.inf
         else:
-            if empirical_min is not None and empirical_max is not None:
-                min_vals[j] = empirical_min[j]
-                max_vals[j] = empirical_max[j]
-            else:
-                raise ValueError(f"Unbounded dimension {j} and no empirical fallback provided")
+            # Other failure (infeasible, iteration limit, etc.)
+            raise ValueError(f"LP failed for min bound, dim {j}: {res_min.message}")
+
+        # Maximize x_j (by minimizing -x_j)
+        c[j] = -1 # c is already array of zeros, just set c[j]
+        res_max = linprog(c, A_ub=A, b_ub=b, bounds=bounds, method='highs')
+
+        if res_max.success:
+            max_vals[j] = -res_max.fun # Negate because we minimized -x_j
+        elif res_max.status == 3:  # Problem is unbounded
+            max_vals[j] = np.inf   # Maximization leads to +inf if unbounded
+        else:
+            # Other failure
+            raise ValueError(f"LP failed for max bound, dim {j}: {res_max.message}")
+            
     return min_vals, max_vals
-def rect_inside_polytope(A, b, lower, upper, tol=1e-9):
-    """
-    Check whether the rectangle [lower, upper] lies fully inside {x: A x <= b}.
-    Equivalent to checking max_{x in rect} A[k,:] x <= b[k] for each k.
-    That max is sum_j A[k,j] * (upper[j] if A[k,j]>=0 else lower[j]).
-    """
-    # Compute worst-case A x over the rectangle:
-    worst = A.clip(min=0).dot(upper) + A.clip(max=0).dot(lower)
-    return np.all(worst <= b + tol)
 
-def generate_random_rectangles(A, b, min_vals, max_vals, n_rectangles=1000, rng=None):
-    """
-    Randomly generate n_rectangles axis-aligned hyperrectangles inside the polytope {A x <= b}.
-    We sample lower and upper within [min_vals, max_vals] and accept only those that lie inside.
-    Returns a list of (lower, upper) pairs.
-    """
-    if rng is None:
-        rng = np.random.default_rng()
-    n = len(min_vals)
-    total_range = max_vals - min_vals
+# -----------------------------------------------------------------------------
+# 4) Find best rectangle from random sampling
+# -----------------------------------------------------------------------------
 
+def generate_random_rectangles(A, b, n_rectangles=10000, X_hist=None):
+    """
+    Generate candidate axis-aligned rectangles by sampling pairs of feasible points.
+    Each rectangle is defined by two points p,q in X_hist:
+      lower = min(p,q), upper = max(p,q).
+    Only keep rectangles fully inside the polytope.
+    Args:
+      • A, b: polytope constraints
+      • n_rectangles: desired number of candidates
+      • X_hist: ndarray (k, n) of feasible points
+    Returns:
+      • rectangles: list of (lower, upper)
+    """
+    if X_hist is None:
+        raise ValueError("X_hist must be provided for rectangle generation")
     rectangles = []
+    A_pos = np.clip(A, 0, None)
+    A_neg = np.clip(A, None, 0)
+    k, n = X_hist.shape
     attempts = 0
-    cap = n_rectangles * 20
-    while len(rectangles) < n_rectangles and attempts < cap:
-        # Random lower corner in unconditional box:
-        frac = rng.uniform(0, 1, size=n)
-        lower = min_vals + frac * total_range
-        # Random upper corner coords:
-        upper = np.zeros(n)
-        for i in range(n):
-            upper[i] = rng.uniform(lower[i], max_vals[i])
-        # Check if rectangle is inside A x <= b:
-        if rect_inside_polytope(A, b, lower, upper):
-            rectangles.append((lower, upper))
+    max_attempts = n_rectangles * 50
+    while len(rectangles) < n_rectangles and attempts < max_attempts:
         attempts += 1
+        i, j = np.random.randint(0, k, size=2)
+        p, q = X_hist[i], X_hist[j]
+        lower = np.minimum(p, q)
+        upper = np.maximum(p, q)
+        # worst-case check: a^T x <= b for all x in rectangle
+        worst = A_pos.dot(upper) + A_neg.dot(lower)
+        if np.all(worst <= b):
+            rectangles.append((lower, upper))
     return rectangles
 
-def count_points_in_rectangle(X_points, lower, upper):
-    """
-    Count how many rows x in X_points (shape k×n) satisfy 
-    lower[i] <= x[i] <= upper[i] for all i.
-    """
-    mask = np.ones(X_points.shape[0], dtype=bool)
-    for i in range(X_points.shape[1]):
-        mask &= (X_points[:, i] >= lower[i]) & (X_points[:, i] <= upper[i])
-    return int(np.sum(mask))
 
 def find_best_rectangle(X_points, rectangles):
     """
-    Among a list of (lower, upper) rectangles, return the one 
-    that contains the most historical feasible points.
+    From a list of (lower, upper) rectangles, count how many X_points lie inside,
+    and return the index, rectangle, and count of the best one.
+    Args:
+      • X_points: ndarray (k, n)
+      • rectangles: list of (lower, upper)
+    Returns:
+      • best_idx: int
+      • best_rect: tuple (lower, upper)
+      • best_count: int
     """
     best_count = -1
-    best_idx = -1
+    best_idx = None
     best_rect = None
     for idx, (lower, upper) in enumerate(rectangles):
-        cnt = count_points_in_rectangle(X_points, lower, upper)
-        if cnt > best_count:
-            best_count = cnt
+        inside = np.all((X_points >= lower) & (X_points <= upper), axis=1)
+        count = inside.sum()
+        if count > best_count:
+            best_count = count
             best_idx = idx
             best_rect = (lower, upper)
     return best_idx, best_rect, best_count
-
-
