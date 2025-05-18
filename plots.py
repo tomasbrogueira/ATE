@@ -2,53 +2,52 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial import ConvexHull
 
-def plot_feasible_region(X_hist, lower, upper):
-    num_dimensions = X_hist.shape[1]
-    if num_dimensions < 2:
-        print("Cannot plot feasible region for less than 2 dimensions.")
+def plot_feasible_region(X_hist, lower, upper, dims=(0,1)):
+    """
+    Plot a single 2D projection of the feasible region and the best hyperrectangle slice.
+    X_hist: (n_points, 2) array of feasible points for the 2D projection.
+    lower: (2,) array, lower bounds for the rectangle in the 2D projection.
+    upper: (2,) array, upper bounds for the rectangle in the 2D projection.
+    dims: tuple of two ints, indices of the original dimensions.
+    """
+    if X_hist.shape[1] != 2:
+        print("plot_feasible_region expects a 2D array for X_hist (n_points, 2).")
         return
 
-    for i in range(num_dimensions):
-        for j in range(i + 1, num_dimensions):
-            dims = (i, j)
-            pts = X_hist[:, dims]
+    pts = X_hist
 
-            if pts.shape[0] < 3: # ConvexHull needs at least dim+1 points
-                print(f"Not enough feasible points to plot for dimensions {dims}")
-                continue
-            
-            try:
-                hull = ConvexHull(pts)
-                verts = pts[hull.vertices]
-            except Exception as e:
-                print(f"Could not compute Convex Hull for dimensions {dims}: {e}")
-                # Fallback: plot points without hull if hull computation fails
-                verts = None
+    if pts.shape[0] < 3: # ConvexHull needs at least dim+1 points
+        print(f"Not enough feasible points to plot for this 2D projection")
+        verts = None
+    else:
+        try:
+            hull = ConvexHull(pts)
+            verts = pts[hull.vertices]
+        except Exception as e:
+            print(f"Could not compute Convex Hull for this 2D projection: {e}")
+            verts = None
 
+    plt.figure()
+    plt.scatter(pts[:,0], pts[:,1], s=10, alpha=0.6, label="Feasible Points")
 
-            plt.figure()
-            plt.scatter(pts[:,0], pts[:,1], s=10, alpha=0.6, label="Feasible Points")
-            
-            if verts is not None:
-                plt.plot(
-                    np.append(verts[:,0], verts[0,0]),
-                    np.append(verts[:,1], verts[0,1]),
-                    lw=2, color='orange', label="Polytope Boundary"
-                )
+    if verts is not None:
+        plt.plot(
+            np.append(verts[:,0], verts[0,0]),
+            np.append(verts[:,1], verts[0,1]),
+            lw=2, color='orange', label="Polytope Boundary"
+        )
 
-            rx = [lower[dims[0]], upper[dims[0]], upper[dims[0]],
-                  lower[dims[0]], lower[dims[0]]]
-            ry = [lower[dims[1]], lower[dims[1]], upper[dims[1]],
-                  upper[dims[1]], lower[dims[1]]]
-            plt.plot(rx, ry, lw=2, ls='--', color='red', label="Best Hyperrectangle Slice")
+    rx = [lower[0], upper[0], upper[0], lower[0], lower[0]]
+    ry = [lower[1], lower[1], upper[1], upper[1], lower[1]]
+    plt.plot(rx, ry, lw=2, ls='--', color='red', label="Best Hyperrectangle Slice")
 
-            plt.title(f"2D Projection: Nodes {dims[0]} & {dims[1]}")
-            plt.xlabel(f"Node {dims[0]} Injection")
-            plt.ylabel(f"Node {dims[1]} Injection")
-            plt.legend()
-            plt.grid(True)
-            plt.tight_layout()
-            plt.show()
+    plt.xlabel(f"Node {dims[0]} Injection")
+    plt.ylabel(f"Node {dims[1]} Injection")
+    plt.title(f"2D Projection: Nodes {dims[0]} & {dims[1]}")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
 
 def plot_feasible_region_3d(X_hist, lower, upper, dims_to_plot=None):
     if dims_to_plot is None:
@@ -124,3 +123,22 @@ def plot_feasible_region_3d(X_hist, lower, upper, dims_to_plot=None):
     ax.legend()
     plt.tight_layout()
     plt.show()
+
+def plot_time_series(data_series, thresholds, title_prefix):
+    """
+    Plot a time series with upper and lower threshold lines.
+    """
+    for idx, series in enumerate(data_series.values()):
+        plt.figure()
+        plt.plot(series, label="Value Over Time")
+        plt.hlines(thresholds[idx], 0, len(series)-1, linestyles='--', colors='red',
+                   label=f"+{thresholds[idx]} threshold")
+        plt.hlines(-thresholds[idx], 0, len(series)-1, linestyles='--', colors='red',
+                   label=f"-{thresholds[idx]} threshold")
+        plt.title(f"{title_prefix} {list(data_series.keys())[idx]}")
+        plt.xlabel("Step")
+        plt.ylabel("Magnitude")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()

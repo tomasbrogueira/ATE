@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.optimize import linprog
+import itertools
 
 # --------------------------------------------------------------------------
 # 1) Simulate the grid and collect signed nodal injection history (Ii)
@@ -213,6 +214,22 @@ def generate_random_rectangles(A, b, n_rectangles=10000, X_hist=None):
             rectangles.append((lower, upper))
     return rectangles
 
+def filter_contained_rectangles(candidates, A, b):
+    """
+    Filter rectangle candidates to those whose all corners satisfy A x <= b.
+    Candidates: list of (lo, hi) tuples. A: (m,d), b: (m,)
+    """
+    filtered = []
+    for lo, hi in candidates:
+        # generate all 2^d corners
+        valid = True
+        for vertex in itertools.product(*zip(lo, hi)):
+            if np.any(A.dot(vertex) > b + 1e-8):  # small tolerance
+                valid = False
+                break
+        if valid:
+            filtered.append((lo, hi))
+    return filtered
 
 def find_best_rectangle(X_points, rectangles):
     """
