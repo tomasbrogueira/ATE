@@ -113,7 +113,7 @@ def plot_feasible_region_3d(X_hist, lower, upper, dims_to_plot=None):
 
     for edge in edges:
         ax.plot3D(*zip(*edge), color="red", linestyle='--', lw=2)
-    ax.plot([], [], [], color="red", linestyle='--', lw=2, label="Best Hyperrectangle Slice")
+    ax.plot([], [], [], color="red", linestyle='--', lw=2, label="Best Hyperrectangle")
 
 
     ax.set_xlabel(f"Node {dims_to_plot[0]} Injection")
