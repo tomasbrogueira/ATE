@@ -30,38 +30,43 @@ def kyte_grid(rates=[0.5, 1.0, 0.25, 0.75, 0.6], n_points=5000, n_rectangles=500
 
     X_sub = X_hist[:, dims]
     A_sub = A[:, dims]
-    
-    improved_rects = generate_improved_rectangles(A_sub, b, X_sub, n_rectangles)
-    improved_candidates = filter_contained_rectangles(improved_rects, A_sub, b)
-    
-    if len(improved_candidates) < 5:
-        bounded = np.all(np.isfinite(focused_min) & np.isfinite(focused_max))
-        
-        if use_polytope_sampling and bounded:
-            try:
-                I = np.eye(len(dims))
-                A_box = np.vstack([A_sub, I, -I])
-                
-                if X_sub.shape[0] > 0:
-                    data_lo = X_sub.min(axis=0)
-                    data_hi = X_sub.max(axis=0)
-                else:
-                    data_lo = focused_min
-                    data_hi = focused_max
-                
-                b_box = np.concatenate([b, data_hi, -data_lo])
-                rects = generate_rectangles_from_polytope(
-                    A_box, b_box, n_rectangles=n_rectangles, dim=len(dims), random_state=98
-                )
-            except ValueError:
-                rects = generate_random_rectangles(A_sub, b, n_rectangles=n_rectangles, X_hist=X_sub)
-        else:
-            rects = generate_random_rectangles(A_sub, b, n_rectangles=n_rectangles, X_hist=X_sub)
+
+    candidates = []
+    if use_polytope_sampling:
+        try:
+            print("Generating rectangles from polytope...")
+            I = np.eye(len(dims))
+            A_box = np.vstack([A_sub, I, -I])
             
-        candidates = filter_contained_rectangles(rects, A_sub, b)
+            if X_sub.shape[0] > 0:
+                data_lo = X_sub.min(axis=0)
+                data_hi = X_sub.max(axis=0)
+            else:
+                data_lo = focused_min
+                data_hi = focused_max
+            
+            b_box = np.concatenate([b, data_hi, -data_lo])
+            polytope_rects = generate_rectangles_from_polytope(
+                A_box, b_box, n_rectangles=n_rectangles, dim=len(dims), random_state=98
+            )
+            candidates = filter_contained_rectangles(polytope_rects, A_sub, b)
+            print(f"Found {len(candidates)} rectangles from polytope sampling")
+        except ValueError as e:
+            print(f"Polytope sampling error: {e}")
+    
+    if len(candidates) < 5:
+        print("Generating improved rectangles...")
+        improved_rects = generate_improved_rectangles(A_sub, b, X_sub, n_rectangles)
+        improved_candidates = filter_contained_rectangles(improved_rects, A_sub, b)
+        print(f"Found {len(improved_candidates)} valid improved rectangles")
         candidates.extend(improved_candidates)
-    else:
-        candidates = improved_candidates
+    
+    if len(candidates) < 5:
+        print("Using historical sampling as fallback")
+        random_rects = generate_random_rectangles(A_sub, b, n_rectangles=n_rectangles, X_hist=X_sub)
+        random_candidates = filter_contained_rectangles(random_rects, A_sub, b)
+        print(f"Found {len(random_candidates)} rectangles from historical sampling")
+        candidates.extend(random_candidates)
     
     if not candidates:
         print("No rectangle candidates found.")
@@ -93,21 +98,34 @@ def hexagonal_prism_grid(use_polytope_sampling=True, num_points=500, num_rectang
     A_p, b_p = get_hexagonal_prism_polytope(side, z_min, z_max)
     prism_bounds_min, prism_bounds_max = calculate_axis_aligned_bounds(A_p, b_p)
 
+    candidates = []
     if use_polytope_sampling:
-        rectangle_candidates = generate_rectangles_from_polytope(
+        print("Generating rectangles from polytope...")
+        polytope_rects = generate_rectangles_from_polytope(
             A_p, b_p, n_rectangles=num_rectangles, dim=A_p.shape[1], random_state=seed
         )
-    else:
-        rectangle_candidates = generate_random_rectangles(
-            A_p, b_p, n_rectangles=num_rectangles, X_hist=data
-        )
+        candidates = filter_contained_rectangles(polytope_rects, A_p, b_p)
+        print(f"Found {len(candidates)} rectangles from polytope sampling")
+    
+    if len(candidates) < 5:
+        print("Generating improved rectangles...")
+        improved_rects = generate_improved_rectangles(A_p, b_p, data, num_rectangles)
+        improved_candidates = filter_contained_rectangles(improved_rects, A_p, b_p)
+        print(f"Found {len(improved_candidates)} valid improved rectangles")
+        candidates.extend(improved_candidates)
+    
+    if len(candidates) < 5:
+        print("Using historical sampling as fallback")
+        random_rects = generate_random_rectangles(A_p, b_p, n_rectangles=num_rectangles, X_hist=data)
+        random_candidates = filter_contained_rectangles(random_rects, A_p, b_p)
+        print(f"Found {len(random_candidates)} rectangles from historical sampling")
+        candidates.extend(random_candidates)
 
-    valid_rectangles = filter_contained_rectangles(rectangle_candidates, A_p, b_p)
-    if not valid_rectangles:
+    if not candidates:
         print("No contained rectangles generated.")
         return
 
-    best_rect_idx, (best_lower, best_upper), points_covered = find_best_rectangle(data, valid_rectangles)
+    best_rect_idx, (best_lower, best_upper), points_covered = find_best_rectangle(data, candidates)
     print(f"Best rectangle covers {points_covered}/{len(data)} points.")
 
     if data.shape[1] >= 3:
@@ -123,4 +141,5 @@ def hexagonal_prism_grid(use_polytope_sampling=True, num_points=500, num_rectang
 
 
 if __name__ == "__main__":
-    kyte_grid(rates=[0.5, 1.0, 0.25, 0.75, 0.6], n_points=5000, n_rectangles=1000)
+    hexagonal_prism_grid(use_polytope_sampling=True, num_points=5000, num_rectangles=5000, seed=42)
+    kyte_grid(rates=[0.5, 1.0, 0.75, 1, 20], n_points=5000, n_rectangles=1000)
