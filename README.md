@@ -14,7 +14,7 @@ Given a grid representing a power grid, the goal is to identify all safe regions
 The rectangle is defined by the following properties:
 
 ## Grids
-We will are using 2 grids for analysing the problem.
+We will be using 2 grids for analysing the problem.
 ### Hexagonal prism grid
 For testing the methods of finding safe regions, we will use a hexagonal prism with uniform points distribution. In fact we aren't defining a grid, but a set of points in a 3D space.
 ### Kyte grid
