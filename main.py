@@ -142,4 +142,4 @@ def hexagonal_prism_grid(use_polytope_sampling=True, num_points=500, num_rectang
 
 if __name__ == "__main__":
     hexagonal_prism_grid(use_polytope_sampling=True, num_points=5000, num_rectangles=5000, seed=42)
-    kyte_grid(rates=[0.5, 1.0, 0.75, 1, 20], n_points=5000, n_rectangles=1000)
+    kyte_grid(rates=[0.5, 1.0, 0.75, 40, 40], n_points=5000, n_rectangles=1000)
