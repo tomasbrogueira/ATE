@@ -1,35 +1,68 @@
-# ATE
-Safe regions of work for power grid
 
-## Problem definition
+# Safe-Region Finder (Python port)
 
-### Problem statement
-Given a grid representing a power grid, the goal is to identify all safe regions where work can be performed without interference from obstacles.
+This project ports the supervisor’s `Grid_Cap_Regress.m` to Python. It simulates stochastic **node-level injections**, builds linear branch-current limits and finds one **axis-aligned hyper-rectangle** (independent range per node) that is guaranteed to lie inside those limits.
 
-### Useful vocabulary
-- **Power Grid(graph)**: A grid of cells representing a power grid. Each node has an input current (I) or a voltage (V). Each branch of the grid has a certain admitance (Y) and a max rate of current (Rate_ij).
-- **Safe region**: A region of points which is delimited by the conditions of the rates , imposing on the input currents/ voltages of the nodes. The safe region has the following properties:
+---
+## Repo layout
+```
+.
+├─ region_finder.py      # sampling, constraints, three rectangle generators
+├─ main.py               # drives the 5-node “Kyte” case and a 3-D hexagon toy set
+├─ hexagonal_test.py     # hexagonal-prism point cloud + analytic inequalities
+├─ plots.py              # 2-D / 3-D plots
+├─ Grid_Cap_Regress.m    # original MATLAB reference
+├─ sampling_error_bound.md  # derivation of the O(1/m) miss–probability
+└─ README.md             # this file
+```
 
-- **Rectangle**: When talking about a rectangle, we mean an n-dimensional rectangle which is used to the define a safe region of work for the n nodes.  The coordinate system is defined by the input currents/voltages of the nodes. The reason for using a rectangle is that we want to define independent regions of work for each node, which means each dimension must be independent of the others.
-The rectangle is defined by the following properties:
+---
+## Problem
 
-## Grids
-We will be using 2 grids for analysing the problem.
-### Hexagonal prism grid
-For testing the methods of finding safe regions, we will use a hexagonal prism with uniform points distribution. In fact we aren't defining a grid, but a set of points in a 3D space.
-### Kyte grid
-This is a simple grid comprised of 5 nodes.  Nodes 1, 2 and 3 are connected in a triangle. The node 4 is connected to node 3 and node 5 is connected to node 4. Notably node 5 is the ground node.
+**Inputs**  
+* `n` nodes with real current injections collected in a vector \(x∈ℝⁿ\)  
+* Linear branch-current limits expressed as a half-space system \(A x ≤ b\)
 
-## Methods for generating rectangles
-We have created 3 methods for generating rectangles.
+**Feasible set**  
+\[𝒫 = \{x ∈ ℝⁿ \mid A x ≤ b\}.\]
 
-### Method 1: Using the theoretical boundary conditions
+**Goal**  
+Pick lower/upper vectors \(ℓ,u∈ℝⁿ\) such that the axis-aligned box  
+\[ℛ(ℓ,u)=\{x \mid ℓ ≤ x ≤ u\}\]  
+lies entirely inside 𝒫.  The intervals \([ℓ_i,u_i]\) then give **independent limits per node**.
 
-### Method 2: Using 2 feasible points
-Creates a rectangle using 2 feasible points. Checks if the rectangle is feasible. If it is not feasible, the rectangle is discarded. If it is feasible, the rectangle is added to the list of rectangles. After a maximum number of iterations, the method stops. The maximum number of iterations is defined by the user. The method returns a list of rectangles.
+**Why boxes?**  On-line enforcement is trivial: each control centre checks a single inequality \(ℓ_i ≤ x_i ≤ u_i\) without solving coupled flows.
 
-### Method 3: 
+**Hardness**  Maximising \(\mathrm{vol}(ℛ)\) is NP-hard for \(n ≥ 3\), so an exact solver is impractical beyond toy grids.
 
-## Evaluating the rectangles
-We define the best rectangle as the rectangle which contains the most feasible points. For each rectangle the points within are integrated one by one and a tally is computed.
+**Heuristic used in code**  
+1. Draw many candidate boxes via three generators (polytope directions, point pairs, local growth).  
+2. Keep only those whose **every vertex** satisfies \(A v ≤ b\).  
+3. Score candidates by the number of sampled feasible points they enclose; return the top scorer.
+
+**Safety guarantee**  Because all vertices pass the test, the returned box is *provably contained* in 𝒫 even if the sampling missed extreme regions.
+
+---
+## Implemented box generators
+1. **Polytope directions** – `generate_rectangles_from_polytope`
+2. **Point pairs** – `generate_random_rectangles`
+3. **Local growth** – `generate_improved_rectangles`
+
+Each candidate is filtered by `filter_contained_rectangles`; `find_best_rectangle` selects the one covering most feasible samples.
+
+---
+## Test cases provided
+* **Kyte 5-node grid** – `simulate_full_grid` (realistic)
+* **Hexagonal prism** – `hexagonal_test.py` (analytic inequalities)
+
+---
+## Quick start
+```bash
+python main.py        # runs both demos and opens plots
+```
+To change sample sizes or rate limits, edit the two function calls at the bottom of *main.py*.
+
+---
+## Future work
+- **Skip the `A,b` step?**  Build a box only from the `m` Monte‑Carlo samples and rely on probability.  See `sampling_error_bound.md` for the \(O(1/m)\) miss–probability argument.  A helper `estimate_leakage_probability(m, trials)` could measure the curve.
 

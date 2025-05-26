@@ -185,7 +185,9 @@ def calculate_focused_bounds(A, b, dims_of_interest):
     return min_vals, max_vals
 
 def generate_rectangles_from_polytope(A, b, n_rectangles, dim, random_state=None):
-    # Generate rectangles by finding extreme points along random directions
+    """
+    Generate rectangles from the polytope defined by Ax <= b
+    """
     rng = np.random.default_rng(random_state)
     rectangles = []
     
@@ -237,20 +239,22 @@ def generate_random_rectangles(A, b, n_rectangles=10000, X_hist=None):
     
     return rectangles
 
-def filter_contained_rectangles(candidates, A, b):
-    # Keep only rectangles whose every vertex satisfies constraints
-    filtered = []
-    
+
+def filter_contained_rectangles(candidates, A, b, tol=1e-8):
+    """Return rectangles fully contained in {x | A x ≤ b}.
+
+    Works in O(#rect · #ineq · n), using worst‑case face evaluation.
+    """
+    A_pos = np.clip(A, 0, None)   # positive parts a⁺
+    A_neg = np.clip(A, None, 0)   # negative parts a⁻
+    contained = []
+
     for lo, hi in candidates:
-        valid = True
-        for vertex in itertools.product(*zip(lo, hi)):
-            if np.any(A.dot(vertex) > b + 1e-8):
-                valid = False
-                break
-        if valid:
-            filtered.append((lo, hi))
-            
-    return filtered
+        worst = A_pos @ hi + A_neg @ lo
+        if np.all(worst <= b + tol):
+            contained.append((lo, hi))
+
+    return contained
 
 def find_best_rectangle(X_points, rectangles):
     best_count = -1
