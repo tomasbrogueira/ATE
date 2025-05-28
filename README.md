@@ -1,8 +1,5 @@
 
 # Safe-Region Finder (Python port)
-
-This project ports the supervisor’s `Grid_Cap_Regress.m` to Python. It simulates stochastic **node-level injections**, builds linear branch-current limits and finds one **axis-aligned hyper-rectangle** (independent range per node) that is guaranteed to lie inside those limits.
-
 ---
 ## Repo layout
 ```
@@ -64,5 +61,4 @@ To change sample sizes or rate limits, edit the two function calls at the bottom
 
 ---
 ## Future work
-- **Skip the `A,b` step?**  Build a box only from the `m` Monte‑Carlo samples and rely on probability.  See `sampling_error_bound.md` for the \(O(1/m)\) miss–probability argument.  A helper `estimate_leakage_probability(m, trials)` could measure the curve.
-
+- **Skip the `A,b` step?**  Build a box only from the `m` Monte‑Carlo samples and rely on probability.  See `sampling_error_bound.md` for the \(O(1/m)\) miss–probability argument.

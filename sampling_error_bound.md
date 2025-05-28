@@ -1,44 +1,108 @@
-
-# Why the miss–probability decays like $O(1/m)$
-
-Let $m$ be the number of i.i.d. *uniform* samples $x^{(1)},\dots,x^{(m)}$ drawn inside the true safe polytope
-\[\mathcal P = \{x \mid A x \le b\}.\]
-A candidate axis-aligned box
-\[\mathcal R(\ell,u)=\{x \mid \ell \le x \le u\}\]
-is built by taking coordinate-wise minima/maxima of those samples.  We want the probability that the box actually leaks outside $\mathcal P$.
+# Sampling‑error bounds for the three rectangle rules
 
 ---
-## 1  Error event
 
-\[E_m = \bigl\{\exists x \in \mathcal R : Ax > b\bigr\}.\]
-Define the *danger sliver*
-\[\mathcal S = \mathcal R \setminus \mathcal P.\]
+## Shared context
 
----
-## 2  All $m$ points avoided $\mathcal S$
+Safe region (volume rescaled to 1)
 
-Because every sample landed in $\mathcal P$, none landed in $\mathcal S$.  With $\lambda(\cdot)$ the Lebesgue volume and $\lambda(\mathcal P)=1$ (rescale if needed), one sample misses $\mathcal S$ with probability $1-\lambda(\mathcal S)$.  Independence gives
-$$(*)\qquad\Pr[E_m] = \bigl(1-\lambda(\mathcal S)\bigr)^m \le e^{-m\,\lambda(\mathcal S)}.$$
+$$
+  \mathcal P=\{x\in\mathbb R^{n}\mid A x\le b\},\quad \lambda(\mathcal P)=1.
+$$
 
----
-## 3  Expected size of the missed sliver
+Monte‑Carlo cloud
 
-For each coordinate $i$,
-\[\ell_i = \min_k x_i^{(k)},\quad u_i = \max_k x_i^{(k)}.\]
-In 1‑D the expected gap between the true bound and the sample min (or max) is $1/(m+1)$. Extending to $n$ dimensions and union‑bounding over $2n$ faces yields
-\[\mathbb E[\lambda(\mathcal S)] \le \tfrac{C}{m},\quad C=2n\cdot \text{(edge factor)}.\]
+$$
+  x^{(1)},\dots,x^{(m)}\;\overset{\text{i.i.d.}}{\sim}\; \operatorname{Unif}(\mathcal P).
+$$
 
----
-## 4  Plugging into $(*)$
+A rule $\mathsf R$ maps the sample cloud to **one or more** axis‑aligned boxes. Error event
 
-Apply Markov’s inequality to $\lambda(\mathcal S)$:
-\[\Pr[E_m] = \Pr[\lambda(\mathcal S)>0] \le \frac{\mathbb E[\lambda(\mathcal S)]}{\epsilon} \le \frac{C}{m\,\epsilon}.\]
-Choosing $\epsilon=1$ gives
-\[\boxed{\Pr[E_m] \le \tfrac{C}{m}}.\]
+$$
+  E=\{\exists\,\text{built box }\mathcal R\text{ with }\mathcal R\not\subset\mathcal P\}.
+$$
 
 ---
-## 5  Interpretation
 
-*Each extra sample trims roughly a $1/m$‑sized slice off every face of the box, so the leftover unsafe volume—and hence the miss‑probability—shrinks at the same $1/m$ rate.*
+## 1  Point‑pair rule — *k random pairs*
 
-The constant $C$ hides geometry‑specific factors.  If sampling is not uniform, the rate can change (faster with corner‑biased sampling, slower if heavily skewed).  Uniform i.i.d. sampling is the reference case.
+### Construction
+
+Pick *k* unordered index pairs $(i,j)$ without replacement. For each pair build
+
+$$
+  \mathcal R_{ij}=\bigl[\min(x^{(i)},x^{(j)}),\,\max(x^{(i)},x^{(j)})\bigr].
+$$
+
+
+### Proof outline
+
+1. **One pair is bad with constant probability.**  Choose a thin boundary slab
+   $S_\varepsilon=\{x\mid n^T x>b_{\max}-\varepsilon\}$.  Its volume is
+   $\lambda(S_\varepsilon)=c\varepsilon$.  If *both* points of a pair fall in
+   that slab, the top‑corner of the box violates the same inequality; call this
+   event $B$.  Taking $\varepsilon$ small but fixed gives
+   $\Pr(B)=c_0>0.$
+2. **Many pairs make failure near‑certain.**  For weakly‑dependent draws the
+   chance all *k* boxes are safe is $(1-c_0)^k$, hence the heuristic bound
+   $\Pr(E)=1-(1-c_0)^k.$
+   A rigorous union bound gives
+   $\Pr(E)\;\ge\;k c_0-\tbinom{k}{2}c_0^2\;\ge\;(kc_0/2)\wedge1.$
+   For $k\gg1$ the probability is therefore **very close to 1**.
+
+### Result
+
+$$
+  \boxed{\Pr(E)\approx1-(1-c_0)^k\;\text{ and rises → 1 exponentially in }k.}
+$$
+
+---
+
+## 2  Local‑growth rule — isotropic factor *r*
+
+### Construction
+
+Pick a seed sample $p$ and grow a cube centred at $p$; at each step multiply
+all half‑widths by $r>1$ until a second sample touches every one of the $2n$ faces.
+Repeat for as many seeds as desired.
+
+### Detailed derivation
+
+* **1‑D order statistic.**  For uniform $[0,1]$ samples, the expected minimum is
+  $\mathbb E[X_{(1)}]=1/(m+1)$.  After scaling each axis of $\mathcal P$ to unit
+  length the same bound applies to every coordinate gap $\delta_i$.
+* **Sliver volume before inflation.**  Unsafe region sits in $2n$ hyper‑slabs of
+  thickness $\delta_i$, so
+  $\mathbb E[\lambda(\text{sliver})]\le2n\,\tfrac{1}{m+1}=\tfrac{C_0}{m}.$
+* **After inflation.**  Multiplying half‑widths by $r$ multiplies each
+  $\delta_i$ by $r$ ⇒ volume by $r$.
+* **Markov.**  Using $\Pr[Z>0]\le\mathbb E[Z]$ for $Z=\lambda(\text{sliver})$ gives
+  $\Pr(E)\le \dfrac{C_0 r}{m}=\dfrac{C r}{m}.$
+
+### Result
+
+$$
+  \boxed{\Pr(E)\le\dfrac{C r}{m}}\qquad (C\text{ depends on }n,\;\mathcal P).
+$$
+
+
+---
+
+## 3  LP‑direction rule — inequalities enforced
+
+### Construction
+
+Choose random $w$; solve
+$\min_{A x\le b} w^T x,\quad \max_{A x\le b} w^T x,$
+then bound component‑wise between those two optima.
+
+### Containment proof
+
+All vertices inherit the *feasible* property $A x\le b$ from the LP optima and
+are re‑checked by `filter_contained_rectangles`.
+
+### Result
+
+$$
+  \boxed{\Pr(E)=0}\qquad\text{(sampling affects volume, not safety).}
+$$
