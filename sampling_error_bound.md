@@ -53,7 +53,7 @@ $$
 ### Result
 
 $$
-  \boxed{\Pr(E)\approx1-(1-c_0)^k\;\text{ and rises → 1 exponentially in }k.}
+  \boxed{\Pr(E)\approx1-(1-c_0)^k\;\text{ → 1 exponentially in }k.}
 $$
 
 ---
@@ -104,5 +104,5 @@ are re‑checked by `filter_contained_rectangles`.
 ### Result
 
 $$
-  \boxed{\Pr(E)=0}\qquad\text{(sampling affects volume, not safety).}
+  \boxed{\Pr(E)=0}\qquad\text{(sampling does not affect safety).}
 $$

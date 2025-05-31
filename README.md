@@ -17,7 +17,7 @@
 ## Problem
 
 **Inputs**  
-* `n` nodes with real current injections collected in a vector \(x∈ℝⁿ\)  
+* `n` nodes with complex current injections. We collect their absolute values in a vector \(x∈ℝⁿ\)  
 * Linear branch-current limits expressed as a half-space system \(A x ≤ b\)
 
 **Feasible set**  

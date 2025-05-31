@@ -2,7 +2,7 @@ import numpy as np
 import itertools
 
 from region_finder import (
-    simulate_full_grid, build_A_b_from_Y, filter_feasible_points, calculate_axis_aligned_bounds,
+    simulate_full_grid,simulate_full_grid_random_currents, build_A_b_from_Y, filter_feasible_points, calculate_axis_aligned_bounds,
     generate_rectangles_from_polytope, generate_random_rectangles, find_best_rectangle,
     filter_contained_rectangles, calculate_focused_bounds, generate_improved_rectangles
 )
@@ -11,8 +11,8 @@ from plots import plot_time_series, plot_feasible_region, plot_feasible_region_3
 
 
 def kyte_grid(rates=[0.5, 1.0, 0.25, 0.75, 0.6], n_points=5000, n_rectangles=500, 
-              use_polytope_sampling=True, dims=[0, 1, 2]):
-    injections, branch_currents, Y, branch_list = simulate_full_grid(m=n_points, seed=98)
+              use_polytope_sampling=True, dims=[0, 1, 2], variance=0.5):
+    injections, branch_currents, Y, branch_list = simulate_full_grid_random_currents(m=n_points, seed=98, variance=variance)
     X_all = injections.T
     
     plot_time_series(branch_currents, rates, "Branch Current")
@@ -141,5 +141,8 @@ def hexagonal_prism_grid(use_polytope_sampling=True, num_points=500, num_rectang
 
 
 if __name__ == "__main__":
-    hexagonal_prism_grid(use_polytope_sampling=True, num_points=5000, num_rectangles=5000, seed=42)
-    kyte_grid(rates=[0.5, 1.0, 0.75, 40, 40], n_points=5000, n_rectangles=1000)
+    # hexagonal_prism_grid(use_polytope_sampling=True, num_points=5000, num_rectangles=5000, seed=42)
+
+    # loop for variances
+    for variance in [0.1, 0.5, 1.0]:
+        kyte_grid(rates=[0.5, 1.0, 0.75, 40, 40], n_points=10000, n_rectangles=10000, variance=variance)

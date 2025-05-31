@@ -2,11 +2,105 @@ import numpy as np
 from scipy.optimize import linprog
 import itertools
 
-def simulate_full_grid(m=500, seed=98):
+def simulate_full_grid(m=500, seed=98, variance=0.5):
     j = 1j
     np.random.seed(seed)
     
     S = -np.array([0.224, 0.708, 1.572, 0.072, 0.0]) * np.exp(j * 0.3176)
+    I = np.conj(S).reshape(-1, 1)
+    
+    y12 = 1 - j * 10
+    y13 = 2 * y12
+    y23 = 3 - j * 20
+    y34 = y23
+    y45 = 2 * y12
+    
+    Y = np.array([
+        [y12+y13,   -y12,      -y13,      0,        0],
+        [  -y12,  y12+y23,     -y23,      0,        0],
+        [  -y13,     -y23, y13+y23+y34,  -y34,      0],
+        [     0,         0,      -y34, y34+y45,   -y45],
+        [     0,         0,         0,    -y45,    y45]
+    ], dtype=complex)
+    
+    branch_list = [
+        (0, 1, y12),
+        (0, 2, y13),
+        (1, 2, y23),
+        (2, 3, y34),
+        (3, 4, y45)
+    ]
+    
+    e4 = np.random.randn(5, m) * 0.25
+    e1 = np.random.randn(m) * 0.5
+    i1w = [I[0, 0].real]
+    
+    Ii = np.zeros((4, m))
+    i12 = np.zeros(m)
+    i13 = np.zeros(m)
+    i23 = np.zeros(m)
+    i34 = np.zeros(m)
+    i45 = np.zeros(m)
+    
+    Y_reduced = np.delete(np.delete(Y, 4, axis=0), 4, axis=1)
+    I_reduced = I[:4]
+    
+    v_reduced = 1 + np.linalg.pinv(Y_reduced) @ I_reduced[:, 0]
+    v = np.append(v_reduced, 0.0)
+    
+    for idx, (n1, n2, yij) in enumerate(branch_list):
+        val = yij * (v[n1] - v[n2])
+        if idx == 0:
+            i12[0] = np.abs(val) * np.sign(val.real)
+        elif idx == 1:
+            i13[0] = np.abs(val) * np.sign(val.real)
+        elif idx == 2:
+            i23[0] = np.abs(val) * np.sign(val.real)
+        elif idx == 3:
+            i34[0] = np.abs(val) * np.sign(val.real)
+        elif idx == 4:
+            i45[0] = np.abs(val) * np.sign(val.real)
+    
+    Ii[:, 0] = np.abs(I_reduced[:, 0]) * np.sign(I_reduced[:, 0].real)
+    
+    for t in range(m-1):
+        next_I = 0.65 * I[:, t:t+1] + e4[:, t:t+1]
+        i1w.append(0.75 * i1w[-1] + e1[t])
+        next_I[0, 0] = -i1w[-1] + j * next_I[0, 0].imag
+        I = np.hstack((I, next_I))
+        
+        I_reduced_t = I[:4, t+1]
+        v_reduced = 1 + np.linalg.pinv(Y_reduced) @ I_reduced_t
+        v = np.append(v_reduced, 0.0)
+        
+        for idx, (n1, n2, yij) in enumerate(branch_list):
+            val = yij * (v[n1] - v[n2])
+            if idx == 0:
+                i12[t+1] = np.abs(val) * np.sign(val.real)
+            elif idx == 1:
+                i13[t+1] = np.abs(val) * np.sign(val.real)
+            elif idx == 2:
+                i23[t+1] = np.abs(val) * np.sign(val.real)
+            elif idx == 3:
+                i34[t+1] = np.abs(val) * np.sign(val.real)
+            elif idx == 4:
+                i45[t+1] = np.abs(val) * np.sign(val.real)
+        
+        Ii[:, t+1] = np.abs(I_reduced_t) * np.sign(I_reduced_t.real)
+
+    branch_currents = {'i12': i12, 'i13': i13, 'i23': i23, 'i34': i34, 'i45': i45}
+    return Ii, branch_currents, Y_reduced, branch_list
+
+def simulate_full_grid_random_currents(m=500, seed=98, variance=0.5):
+    j = 1j
+    np.random.seed(seed)
+    
+    # Generate random values from normal distribution with mean=0 and specified variance, keeping 5th value as 0
+    real_parts = np.zeros(5)
+    real_parts[:4] = np.random.normal(0, np.sqrt(variance), 4)
+    
+    # Keep the same angle for the imaginary part
+    S = -real_parts * np.exp(j * 0.3176)
     I = np.conj(S).reshape(-1, 1)
     
     y12 = 1 - j * 10
