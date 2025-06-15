@@ -277,6 +277,112 @@ def build_A_b_from_ols(X, I, rates,
     return np.vstack(A_rows), np.array(b_rows)
 
 
+def _linf_branch_fit(X, I_branch, safety_factor=1.05):
+    """
+    One‑branch L∞ regression.
+
+    Parameters
+    ----------
+    X : (m, n) ndarray
+        Historical injections (rows = samples, columns = non‑slack buses).
+    I_branch : (m,) ndarray
+        Historical signed current on *one* branch (same order as X).
+    safety_factor : float, optional
+        Multiplier λ > 1 applied to the max‑error margin to hedge against
+        unseen operating points.  Typical values 1.05 – 1.10.
+
+    Returns
+    -------
+    a : (n,) ndarray
+        Sensitivity vector so that  Î = a·x  predicts the branch current.
+    delta : float
+        Inflated worst‑case residual  delta = λ · max_k |I_k − a·X_k|.
+    """
+    m, n = X.shape
+
+    # ---------- build the LP  -------------------------------------------
+    # Decision variables z = [a_1 … a_n ,  t]^T  (length n+1).
+    # Minimise t   subject to
+    #     + X_k·a - I_k  ≤  t
+    #     - X_k·a + I_k  ≤  t
+    # and t ≥ 0.
+    #
+    # 2 m inequalities in matrix form:  A_ub · z ≤ b_ub
+    A_ub = np.vstack((
+        np.hstack((+X, -np.ones((m, 1)))),
+        np.hstack((-X, -np.ones((m, 1))))
+    ))
+    b_ub = np.hstack((+I_branch, -I_branch))
+
+    c = np.zeros(n + 1)          # minimise t ⇒ objective = [0 … 0 1]
+    c[-1] = 1.0
+
+    bounds = [(None, None)] * n + [(0.0, None)]   # a free,  t ≥ 0
+
+    res = linprog(c, A_ub=A_ub, b_ub=b_ub,
+                  bounds=bounds, method="highs")
+
+    if not res.success:
+        raise RuntimeError(f"L∞ LP failed: {res.message}")
+
+    a     = res.x[:-1]
+    t_max = res.x[-1]
+    delta = safety_factor * t_max
+    return a, delta
+
+def build_A_b_linf(X, I, rates, safety_factor=1.05, verbose=False):
+    """
+    Build (A, b) for the polytope  Ax ≤ b  using per‑branch L∞ fits.
+
+    Parameters
+    ----------
+    X : (m, n) ndarray
+        Historical injections.
+    I : (m, b) ndarray
+        Historical signed currents for *all* monitored branches.
+        Columns must correspond to the order of `rates`.
+    rates : (b,) ndarray or list
+        Thermal / ampacity limits (positive scalars, one per branch).
+    safety_factor : float, optional
+        λ > 1  multiplier for the empirical max residual (default 1.05).
+    verbose : bool, optional
+        If True, prints the fitted delta and retained margin per branch.
+
+    Returns
+    -------
+    A : (2b, n) ndarray
+    b : (2b,) ndarray
+        Two‑sided linear constraints, ready for Ax ≤ b checks.
+    """
+    X = np.asarray(X, dtype=float)
+    I = np.asarray(I, dtype=float)
+    rates = np.asarray(rates, dtype=float)
+
+    m, n = X.shape
+    b_branches = I.shape[1]
+    if rates.shape[0] != b_branches:
+        raise ValueError("rates and I must have the same branch dimension")
+
+    A_rows, b_rows = [], []
+
+    for j in range(b_branches):
+        a_ij, delta = _linf_branch_fit(X, I[:, j], safety_factor)
+
+        if verbose:
+            print(f"branch {j:3d} | max‑err = {delta/safety_factor:.4g} "
+                  f"→ margin = {delta:.4g}")
+
+        # + direction
+        A_rows.append(+a_ij)
+        b_rows.append(rates[j] - delta)
+
+        # - direction
+        A_rows.append(-a_ij)
+        b_rows.append(rates[j] - delta)
+
+    return np.vstack(A_rows), np.array(b_rows)
+
+
 def filter_feasible_points(Ii, A, b, tol=1e-6):
     X_all = Ii.T
     feas_mask = np.all(A.dot(X_all.T) <= b[:, None] + tol, axis=0)
