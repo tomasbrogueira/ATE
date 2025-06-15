@@ -216,6 +216,67 @@ def build_A_b_from_Y(Y, branch_list, rates):
     
     return A, b
 
+def ols_slopes(X, I):
+    """
+    X … (m, n) injections     I … (m, b) branch currents
+    returns a_plus, a_minus   each shape (b, n)
+    """
+    m, n = X.shape
+    b    = I.shape[1]
+    a_plus  = np.zeros((b, n))
+    a_minus = np.zeros((b, n))
+
+    for j in range(b):
+        # + direction  (keep sign)
+        reg = LinearRegression(fit_intercept=False).fit(X, I[:, j])
+        a_plus[j] = reg.coef_
+
+        # – direction  (negate currents)
+        reg = LinearRegression(fit_intercept=False).fit(X, -I[:, j])
+        a_minus[j] = reg.coef_
+
+    return a_plus, a_minus
+
+def residual_margins(X, I, a_vecs, direction="+", rule="max", z=2.58, q=0.995):
+    """
+    a_vecs … shape (b, n) (slopes for + or –)
+    direction … "+" or "-"  (only for labelling)
+    rule … "max" | "sigma" | "quant"
+    returns delta (length‑b)
+    """
+    b = a_vecs.shape[0]
+    delta = np.zeros(b)
+    for j in range(b):
+        r = I[:, j] - X @ a_vecs[j] if direction == "+" else -I[:, j] - X @ a_vecs[j]
+        if rule == "max":
+            delta[j] = np.abs(r).max()
+        elif rule == "sigma":
+            delta[j] = z * r.std(ddof=1)
+        elif rule == "quant":
+            delta[j] = np.quantile(np.abs(r), q)
+        else:
+            raise ValueError("unknown rule")
+    return delta
+
+def build_A_b_from_ols(X, I, rates,
+                       rule="max", z=2.58, q=0.995, inflate=1.05):
+    a_plus, a_minus = ols_slopes(X, I)
+    delta_plus  = residual_margins(X, I, a_plus , "+", rule, z, q)
+    delta_minus = residual_margins(X, I, a_minus, "-", rule, z, q)
+
+    A_rows, b_rows = [], []
+    for j, R in enumerate(rates):
+        # upper limit  (+ direction)
+        A_rows.append(+a_plus[j])
+        b_rows.append(R - inflate*delta_plus[j])
+
+        # lower limit  (– direction)
+        A_rows.append(-a_minus[j])
+        b_rows.append(R - inflate*delta_minus[j])
+
+    return np.vstack(A_rows), np.array(b_rows)
+
+
 def filter_feasible_points(Ii, A, b, tol=1e-6):
     X_all = Ii.T
     feas_mask = np.all(A.dot(X_all.T) <= b[:, None] + tol, axis=0)
