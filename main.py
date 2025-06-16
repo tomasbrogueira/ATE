@@ -85,8 +85,9 @@ def kyte_grid(rates=[0.5, 1.0, 0.25, 0.75, 0.6], v_min=[-5.0, -5.0, -5.0, -5.0],
     if len(candidates) < 5:
         print("Generating improved rectangles...")
         improved_rects = generate_improved_rectangles(A_sub, b, X_sub, n_rectangles)
-        improved_candidates = filter_contained_rectangles(improved_rects, A_sub, b)
-        print(f"Found {len(improved_candidates)} valid improved rectangles")
+        # improved_candidates = filter_contained_rectangles(improved_rects, A_sub, b)
+        #print(f"Found {len(improved_candidates)} valid improved rectangles")
+        improved_candidates = improved_rects
         candidates.extend(improved_candidates)
     
     if len(candidates) < 5:
