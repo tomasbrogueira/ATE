@@ -1,144 +1,167 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.spatial import ConvexHull
+from scipy.spatial import ConvexHull, HalfspaceIntersection
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+from typing import Sequence, Tuple, List, Optional
 
-def plot_feasible_region(X_hist, lower, upper, dims=(0,1)):
+
+# ──────────────────────────────────────────────────────────────────────
+# utility helpers
+# ──────────────────────────────────────────────────────────────────────
+def _rectangle_vertices(lo: np.ndarray, hi: np.ndarray) -> np.ndarray:
+    """Return the 2^n corner points of an axis‑aligned rectangle."""
+    lo = np.asarray(lo)
+    hi = np.asarray(hi)
+    n  = len(lo)
+    corners = []
+    for mask in range(1 << n):
+        c = np.where([(mask >> i) & 1 for i in range(n)], hi, lo)
+        corners.append(c)
+    return np.vstack(corners)
+
+
+def _polytope_vertices(A: np.ndarray,
+                       b: np.ndarray,
+                       interior_pt: Optional[np.ndarray] = None
+                       ) -> np.ndarray:
+    """Vertices of a bounded polytope {x | A x ≤ b} (up to ≈ 6‑D)."""
+    A, b = np.asarray(A, float), np.asarray(b, float)
+    m, n = A.shape
+    if interior_pt is None:
+        # find a feasible interior point by LP  min 0  s.t. A x ≤ b − ε
+        from scipy.optimize import linprog
+        eps = 1e-6
+        res = linprog(np.zeros(n), A_ub=A, b_ub=b - eps)
+        if not res.success:
+            raise RuntimeError("polytope seems empty or unbounded")
+        interior_pt = res.x
+    half = np.hstack((-A, -b[:, None]))
+    hs_int = HalfspaceIntersection(half, interior_pt)
+    return hs_int.intersections
+
+
+def _project(points: np.ndarray, dims: Tuple[int, ...]) -> np.ndarray:
+    """Select the given coordinates from every point row."""
+    return points[:, dims]
+
+
+# ──────────────────────────────────────────────────────────────────────
+# main plotting routine
+# ──────────────────────────────────────────────────────────────────────
+def plot_region(
+    dims: Tuple[int, ...] = (0, 1),
+    *,
+    poly_eq: Optional[Tuple[np.ndarray, np.ndarray]] = None,
+    pts: Optional[np.ndarray] = None,
+    rects_from_pts: Optional[List[Tuple[np.ndarray, np.ndarray]]] = None,
+    rects_from_poly: Optional[List[Tuple[np.ndarray, np.ndarray]]] = None,
+    ax=None,
+    show: bool = True,
+    labels: dict | None = None,
+    colours: dict | None = None,
+    alphas: dict | None = None,
+):
     """
-    Plot a single 2D projection of the feasible region and the best hyperrectangle slice.
-    X_hist: (n_points, 2) array of feasible points for the 2D projection.
-    lower: (2,) array, lower bounds for the rectangle in the 2D projection.
-    upper: (2,) array, upper bounds for the rectangle in the 2D projection.
-    dims: tuple of two ints, indices of the original dimensions.
+    Plot up to four kinds of geometric objects in the chosen projection.
+
+    Parameters
+    ----------
+    dims            tuple of coordinate indices (len==2 or 3)
+    poly_eq         (A, b)    – polytope from inequalities
+    pts             (m, n)    – point cloud; convex hull will be drawn
+    rects_from_pts  list[(lo, hi)]  – rectangles grown from points
+    rects_from_poly list[(lo, hi)]  – rectangles valid by A,b
+    ax              existing Axes or Axes3D (created if None)
+    labels / colours / alphas
+                    optional dicts to override legend text, colours,
+                    transparency; keys: 'poly_eq','poly_hull',
+                    'rect_pts','rect_poly'.
     """
-    if X_hist.shape[1] != 2:
-        print("plot_feasible_region expects a 2D array for X_hist (n_points, 2).")
-        return
 
-    pts = X_hist
+    labels  = labels  or dict(poly_eq="poly (A,b)",
+                              poly_hull="poly (hull)",
+                              rect_pts="rect‑pts",
+                              rect_poly="rect‑poly")
+    colours = colours or dict(poly_eq="#1f77b4",
+                              poly_hull="#2ca02c",
+                              rect_pts="#d62728",
+                              rect_poly="#9467bd")
+    alphas  = alphas  or dict(poly_eq=.18,
+                              poly_hull=.10,
+                              rect_pts=.08,
+                              rect_poly=.08)
 
-    if pts.shape[0] < 3: # ConvexHull needs at least dim+1 points
-        print(f"Not enough feasible points to plot for this 2D projection")
-        verts = None
-    else:
-        try:
-            hull = ConvexHull(pts)
-            verts = pts[hull.vertices]
-        except Exception as e:
-            print(f"Could not compute Convex Hull for this 2D projection: {e}")
-            verts = None
+    is3d = len(dims) == 3
+    if ax is None:
+        fig = plt.figure(figsize=(6, 5))
+        ax = fig.add_subplot(111, projection='3d' if is3d else None)
 
-    plt.figure()
-    plt.scatter(pts[:,0], pts[:,1], s=10, alpha=0.6, label="Feasible Points")
-
-    if verts is not None:
-        plt.plot(
-            np.append(verts[:,0], verts[0,0]),
-            np.append(verts[:,1], verts[0,1]),
-            lw=2, color='orange', label="Polytope Boundary"
-        )
-
-    rx = [lower[0], upper[0], upper[0], lower[0], lower[0]]
-    ry = [lower[1], lower[1], upper[1], upper[1], lower[1]]
-    plt.plot(rx, ry, lw=2, ls='--', color='red', label="Best Hyperrectangle Slice")
-
-    plt.xlabel(f"Node {dims[0]} Injection")
-    plt.ylabel(f"Node {dims[1]} Injection")
-    plt.title(f"2D Projection: Nodes {dims[0]} & {dims[1]}")
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-    plt.show()
-
-def plot_feasible_region_3d(X_hist, lower, upper, dims_to_plot=None):
-    if dims_to_plot is None:
-        if X_hist.shape[1] == 3:
-            dims_to_plot = [0, 1, 2]
+    # 1  polytope from (A,b) ------------------------------------------------
+    if poly_eq is not None:
+        A, b = poly_eq
+        V    = _polytope_vertices(A, b)
+        P    = _project(V, dims)
+        if is3d:
+            hull = ConvexHull(P)
+            faces = [[P[v] for v in simplex] for simplex in hull.simplices]
+            ax.add_collection3d(Poly3DCollection(
+                faces, facecolor=colours['poly_eq'],
+                alpha=alphas['poly_eq'], label=labels['poly_eq']))
         else:
-            print("Data is not 3-dimensional and no specific dimensions to plot were provided for 3D plot.")
-            return
-    elif len(dims_to_plot) != 3:
-        print("dims_to_plot must specify exactly three dimensions for a 3D plot.")
-        return
-    
-    for dim_idx in dims_to_plot:
-        if not (0 <= dim_idx < X_hist.shape[1]):
-            print(f"Dimension index {dim_idx} is out of bounds for X_hist with {X_hist.shape[1]} dimensions.")
-            return
+            hull = ConvexHull(P)
+            ax.fill(P[hull.vertices, 0], P[hull.vertices, 1],
+                    color=colours['poly_eq'], alpha=alphas['poly_eq'],
+                    label=labels['poly_eq'])
 
-    X_plot = X_hist[:, dims_to_plot]
-    lower_plot = lower[dims_to_plot]
-    upper_plot = upper[dims_to_plot]
+    # 2  convex hull of sample points --------------------------------------
+    if pts is not None and pts.shape[0] >= len(dims) + 1:
+        H = ConvexHull(pts[:, dims])
+        P = pts[:, dims]
+        if is3d:
+            faces = [[P[v] for v in simplex] for simplex in H.simplices]
+            ax.add_collection3d(Poly3DCollection(
+                faces, facecolor=colours['poly_hull'],
+                alpha=alphas['poly_hull'], label=labels['poly_hull']))
+        else:
+            ax.fill(P[H.vertices, 0], P[H.vertices, 1],
+                    color=colours['poly_hull'], alpha=alphas['poly_hull'],
+                    label=labels['poly_hull'])
 
-    if X_plot.shape[0] < 4: # ConvexHull in 3D needs at least 4 points
-        print(f"Not enough feasible points (found {X_plot.shape[0]}) in the selected dimensions {dims_to_plot} to compute 3D Convex Hull. Need at least 4.")
-        # We can still plot points and rectangle
+    # rectangle helper ------------------------------------------------------
+    def _draw_rect(lo, hi, colour, alpha, lab):
+        V = _rectangle_vertices(lo, hi)
+        P = _project(V, dims)
+        if is3d:
+            hull = ConvexHull(P)
+            faces = [[P[v] for v in simplex] for simplex in hull.simplices]
+            ax.add_collection3d(Poly3DCollection(
+                faces, facecolor=colour, alpha=alpha, label=lab))
+        else:
+            hull = ConvexHull(P)
+            ax.fill(P[hull.vertices, 0], P[hull.vertices, 1],
+                    color=colour, alpha=alpha, label=lab)
 
-    fig = plt.figure(figsize=(10, 8))
-    ax = fig.add_subplot(111, projection='3d')
+    # 3  rectangles from points --------------------------------------------
+    if rects_from_pts:
+        for k, (lo, hi) in enumerate(rects_from_pts, 1):
+            _draw_rect(lo, hi,
+                       colours['rect_pts'], alphas['rect_pts'],
+                       f"{labels['rect_pts']} {k}")
 
-    # Plot feasible points
-    ax.scatter(X_plot[:, 0], X_plot[:, 1], X_plot[:, 2], s=10, alpha=0.4, label="Feasible Points")
+    # 4  rectangles from polytope equations ---------------------------------
+    if rects_from_poly:
+        for k, (lo, hi) in enumerate(rects_from_poly, 1):
+            _draw_rect(lo, hi,
+                       colours['rect_poly'], alphas['rect_poly'],
+                       f\"{labels['rect_poly']} {k}\")
 
-    # Plot Convex Hull of feasible points
-    if X_plot.shape[0] >= 4:
-        try:
-            hull = ConvexHull(X_plot)
-            # Draw the triangular faces of the hull
-            for s in hull.simplices:
-                s_aug = np.append(s, s[0]) # Close the triangle for plotting
-                ax.plot(X_plot[s_aug, 0], X_plot[s_aug, 1], X_plot[s_aug, 2], "orange", lw=0.5, alpha=0.7)
-            # Dummy plot for legend
-            ax.plot([], [], [], color="orange", label="Polytope Boundary (Convex Hull)")
-        except Exception as e:
-            print(f"Could not compute or plot 3D Convex Hull for dimensions {dims_to_plot}: {e}")
-
-
-    # Plot the best hyperrectangle (cuboid slice)
-    v = np.array([
-        [lower_plot[0], lower_plot[1], lower_plot[2]],
-        [upper_plot[0], lower_plot[1], lower_plot[2]],
-        [upper_plot[0], upper_plot[1], lower_plot[2]],
-        [lower_plot[0], upper_plot[1], lower_plot[2]],
-        [lower_plot[0], lower_plot[1], upper_plot[2]],
-        [upper_plot[0], lower_plot[1], upper_plot[2]],
-        [upper_plot[0], upper_plot[1], upper_plot[2]],
-        [lower_plot[0], upper_plot[1], upper_plot[2]]
-    ])
-
-    edges = [
-        [v[0], v[1]], [v[1], v[2]], [v[2], v[3]], [v[3], v[0]],  # Bottom face
-        [v[4], v[5]], [v[5], v[6]], [v[6], v[7]], [v[7], v[4]],  # Top face
-        [v[0], v[4]], [v[1], v[5]], [v[2], v[6]], [v[3], v[7]]   # Vertical edges
-    ]
-
-    for edge in edges:
-        ax.plot3D(*zip(*edge), color="red", linestyle='--', lw=2)
-    ax.plot([], [], [], color="red", linestyle='--', lw=2, label="Best Hyperrectangle")
-
-
-    ax.set_xlabel(f"Node {dims_to_plot[0]} Injection")
-    ax.set_ylabel(f"Node {dims_to_plot[1]} Injection")
-    ax.set_zlabel(f"Node {dims_to_plot[2]} Injection")
-    ax.set_title(f"3D Feasible Region (Nodes {dims_to_plot[0]},{dims_to_plot[1]},{dims_to_plot[2]}) and Best Hyperrectangle Slice")
-    ax.legend()
-    plt.tight_layout()
-    plt.show()
-
-def plot_time_series(data_series, thresholds, title_prefix):
-    """
-    Plot a time series with upper and lower threshold lines.
-    """
-    for idx, series in enumerate(data_series.values()):
-        plt.figure()
-        plt.plot(series, label="Value Over Time")
-        plt.hlines(thresholds[idx], 0, len(series)-1, linestyles='--', colors='red',
-                   label=f"+{thresholds[idx]} threshold")
-        plt.hlines(-thresholds[idx], 0, len(series)-1, linestyles='--', colors='red',
-                   label=f"-{thresholds[idx]} threshold")
-        plt.title(f"{title_prefix} {list(data_series.keys())[idx]}")
-        plt.xlabel("Step")
-        plt.ylabel("Magnitude")
-        plt.legend()
-        plt.grid(True)
+    # axis labels & legend --------------------------------------------------
+    ax.set_xlabel(f"x[{dims[0]}]")
+    ax.set_ylabel(f"x[{dims[1]}]")
+    if is3d:
+        ax.set_zlabel(f"x[{dims[2]}]")
+    ax.legend(loc='best')
+    if show:
         plt.tight_layout()
         plt.show()
+    return ax
