@@ -8,7 +8,7 @@ import itertools
 
 
 # ──────────────────────────────────────────────────────────────────────
-# utility helpers
+# Utility helpers
 # ──────────────────────────────────────────────────────────────────────
 def _rectangle_vertices(lo: np.ndarray, hi: np.ndarray) -> np.ndarray:
     """Return the 2^n corner points of an axis‑aligned rectangle."""
@@ -57,17 +57,18 @@ def _polytope_vertices(A: np.ndarray,
                     raise RuntimeError("polytope seems empty or unbounded")
             else:
                 interior_pt = res.x
-        except Exception as e:
+        except Exception:
             interior_pt = np.zeros(n)
             
     try:
         half = np.hstack((-A, -b[:, None]))
         hs_int = HalfspaceIntersection(half, interior_pt)
         return hs_int.intersections
-    except Exception as e:
+    except Exception:
         # Return a small hypercube as fallback
         unit_cube = np.array(list(itertools.product([-1, 1], repeat=n)))
         return unit_cube
+
 
 def _project(points: np.ndarray, dims: Tuple[int, ...]) -> np.ndarray:
     """Select the given coordinates from every point row."""
@@ -75,7 +76,7 @@ def _project(points: np.ndarray, dims: Tuple[int, ...]) -> np.ndarray:
 
 
 # ──────────────────────────────────────────────────────────────────────
-# main plotting routine
+# Main plotting routine
 # ──────────────────────────────────────────────────────────────────────
 def plot_region(
     dims: Tuple[int, ...] = (0, 1),
@@ -92,7 +93,9 @@ def plot_region(
     view_elevation: float = 30,
     view_azimuth: float = 45,
     debug: bool = False,
-    interactive: bool = True
+    interactive: bool = True,
+    block: bool = False,
+    dim_labels: List[int] = None
 ):
     """
     Plot up to four kinds of geometric objects in the chosen projection.
@@ -116,6 +119,8 @@ def plot_region(
     interactive : bool, default True
         If True and is3d is True, creates an interactive plot that allows
         rotation and viewing from different angles.
+    dim_labels : List[int], optional
+        Original dimension indices for axis labels
     """
     # Default values for labels and colors
     labels  = labels  or dict(poly_eq="Polytope boundaries",
@@ -166,7 +171,7 @@ def plot_region(
                 ax.plot(vertices[:, 0], vertices[:, 1],
                        color=colours['poly_eq'], linewidth=1.5,
                        label=labels['poly_eq'])
-        except Exception as e:
+        except Exception:
             pass
 
     # 2. Draw the convex hull of points
@@ -234,7 +239,8 @@ def plot_region(
                          label=lab if not added_rect_label else "")
                 added_rect_label = True
         else:
-            # For 2D, draw rectangle edges
+            # For 2D, draw rectangle edges - Need to create vertices first
+            V = _rectangle_vertices(lo, hi)
             P = _project(V, dims)
             hull = ConvexHull(P)
             vertices = P[hull.vertices]
@@ -253,14 +259,19 @@ def plot_region(
             _draw_rect(lo, hi, colours['rect_poly'], alphas['rect_poly'], labels['rect_poly'])
 
     # Set up axis labels and appearance
-    ax.set_xlabel(f"x[{dims[0]}]", fontsize=12)
-    ax.set_ylabel(f"x[{dims[1]}]", fontsize=12)
+    if dim_labels is not None:
+        ax.set_xlabel(f"I[{dim_labels[0]}]", fontsize=12)
+        ax.set_ylabel(f"I[{dim_labels[1]}]", fontsize=12)
+        if is3d and len(dim_labels) > 2:
+            ax.set_zlabel(f"I[{dim_labels[2]}]", fontsize=12)
+    else:
+        ax.set_xlabel(f"I[{dims[0]}]", fontsize=12)
+        ax.set_ylabel(f"I[{dims[1]}]", fontsize=12)
+        if is3d:
+            ax.set_zlabel(f"I[{dims[2]}]", fontsize=12)
     
     if is3d:
-        ax.set_zlabel(f"x[{dims[2]}]", fontsize=12)
         ax.view_init(elev=view_elevation, azim=view_azimuth)
-        
-        # Clean up 3D appearance
         ax.xaxis.pane.fill = False
         ax.yaxis.pane.fill = False
         ax.zaxis.pane.fill = False
@@ -274,17 +285,15 @@ def plot_region(
         if is3d and interactive:
             plt.ion()
             plt.tight_layout()
-            plt.draw()
-            plt.pause(0.001)
-            input("Press Enter to continue...\n")
+            plt.show(block=block)
         else:
             plt.tight_layout()
-            plt.show()
+            plt.show(block=block)
     
     return ax
 
 
-def plot_time_series(data_series, thresholds, title_prefix):
+def plot_time_series(data_series, thresholds, title_prefix, block=False):
     """Plot a time series with upper and lower threshold lines."""
     for idx, series in enumerate(data_series.values()):
         plt.figure()
@@ -299,4 +308,4 @@ def plot_time_series(data_series, thresholds, title_prefix):
         plt.legend()
         plt.grid(True)
         plt.tight_layout()
-        plt.show()
+        plt.show(block=block)
