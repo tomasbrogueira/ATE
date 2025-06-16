@@ -165,3 +165,24 @@ def plot_region(
         plt.tight_layout()
         plt.show()
     return ax
+
+
+
+def plot_time_series(data_series, thresholds, title_prefix):
+    """
+    Plot a time series with upper and lower threshold lines.
+    """
+    for idx, series in enumerate(data_series.values()):
+        plt.figure()
+        plt.plot(series, label="Value Over Time")
+        plt.hlines(thresholds[idx], 0, len(series)-1, linestyles='--', colors='red',
+                   label=f"+{thresholds[idx]} threshold")
+        plt.hlines(-thresholds[idx], 0, len(series)-1, linestyles='--', colors='red',
+                   label=f"-{thresholds[idx]} threshold")
+        plt.title(f"{title_prefix} {list(data_series.keys())[idx]}")
+        plt.xlabel("Step")
+        plt.ylabel("Magnitude")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
