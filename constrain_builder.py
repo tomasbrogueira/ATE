@@ -174,9 +174,8 @@ def build_voltage_constraints(
 
 
 # ---------------------------------------------------------------------
-# 4.  High‑level wrapper
+# 4.  High‑level wrapper  — now with full docstring
 # ---------------------------------------------------------------------
-
 def build_A_b_full(
     X: np.ndarray,
     I: np.ndarray,
@@ -191,9 +190,82 @@ def build_A_b_full(
     verbose: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Returns the complete (A, b) matrix/vector.
+    Construct a complete set of linear safety constraints
+    for a power‑grid operating point **x** (vector of non‑slack injections).
 
-    current_kwargs are passed to build_branch_current_constraints().
+    The resulting polytope is
+
+        { x ∈ ℝⁿ :  A  x  ≤  b } ,
+
+    where rows come from
+
+        • branch‑current limits   |I_ij(x)| ≤ rates[j]      (2·b rows)
+        • nodal‑voltage limits    v_min ≤ v(x) ≤ v_max      (2·n rows, optional)
+
+    Parameters
+    ----------
+    X : ndarray, shape (m, n)
+        Historical injection matrix.  Each row is a non‑slack injection vector
+        xᵏ  whose dimension n equals the number of controllable buses.
+
+    I : ndarray, shape (m, b)
+        Historical signed branch currents corresponding to X.
+        Column order must match ``rates``.
+
+    rates : array‑like, shape (b,)
+        Positive ampacity (thermal) limits, one per monitored branch.
+
+    Y_full : ndarray, shape (N, N)
+        Full complex nodal admittance matrix of the network, including the
+        slack bus.  The routine removes the slack row/column internally to
+        obtain  Y_red and its inverse for voltage sensitivities.
+
+    v_min, v_max : ndarray, shape (n,), optional
+        Per‑bus voltage lower / upper bounds (pu) for the *non‑slack* buses.
+        If either is ``None`` the corresponding half‑spaces are omitted.
+
+    current_method : {'linf', 'ols'}, default 'linf'
+        Technique used to estimate the branch‑current sensitivity vectors:
+            'linf'  – Chebyshev (min‑max) regression, tightest deterministic
+            'ols'   – ordinary least‑squares + explicit safety margin
+
+    current_kwargs : dict, optional
+        Extra keyword arguments forwarded to the chosen current‑fit routine.
+        * For 'linf':  ``safety_factor=float``   (λ ≥ 1, default 1.05)
+        * For 'ols' :  ``margin={'max','sigma','quant'}``
+                       ``inflate=float``         (λ ≥ 1)
+                       ``z=float`` or ``q=float`` (tail parameters)
+
+    slack_idx : int, default -1
+        Index of the slack bus in ``Y_full`` (negative values are Pythonic).
+
+    verbose : bool, default False
+        If True, prints per‑branch residuals / margins while fitting.
+
+    Returns
+    -------
+    A : ndarray, shape (2·b + 2·n_v, n)
+        Stacked constraint matrix where n_v = n if both v_min & v_max given,
+        else n_v = 0.
+
+    b : ndarray, shape (A.shape[0],)
+        Right‑hand‑side vector already tightened by the data‑driven margins
+        (branch currents) and by the fixed voltage safety factor (default
+        1.02 inside ``build_voltage_constraints``).
+
+    Notes
+    -----
+    * For 'linf' the branch‑current constraints are satisfied by **all**
+      historical samples; the optional ``safety_factor`` λ > 1 enlarges the
+      margin for unseen operating points.
+
+    * For 'ols' the quality of the bound depends on the chosen margin rule:
+      ``margin='max'`` is deterministic on the training set,
+      ``'sigma'`` or ``'quant'`` give probabilistic control.
+
+    * The extra rows added for voltage limits increase the total constraint
+      count by 2·n but have negligible computational impact because typically
+      b ≫ n.
     """
     current_kwargs = {} if current_kwargs is None else current_kwargs
     A_I, b_I = build_branch_current_constraints(
@@ -211,6 +283,7 @@ def build_A_b_full(
     A = np.vstack((A_I, A_V))
     b = np.hstack((b_I, b_V))
     return A, b
+
 
 
 # ---------------------------------------------------------------------
