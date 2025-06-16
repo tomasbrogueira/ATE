@@ -128,11 +128,31 @@ def build_branch_current_constraints(
 # 3.  Voltage‑limit inequality factory
 # ---------------------------------------------------------------------
 
-def _reduced_Y_inverse(Y_full: np.ndarray, slack_idx: int = -1) -> np.ndarray:
+def _reduced_Y_inverse(Y_full: np.ndarray, slack_idx: int = -1, already_reduced: bool = False) -> np.ndarray:
     """
     Remove the slack row/column and return  (Y_red)^‑1.
     Assumes Y is nonsingular after slack removal.
+    
+    Parameters
+    ----------
+    Y_full : ndarray
+        The admittance matrix, which may already be reduced
+    slack_idx : int
+        Index of slack bus to remove (if not already removed)
+    already_reduced : bool
+        If True, skips the reduction step and directly computes inverse
+        
+    Returns
+    -------
+    ndarray
+        The inverse of the (reduced) admittance matrix
     """
+    # If Y is already reduced, just return its inverse
+    if already_reduced:
+        print(f"Y matrix of size {Y_full.shape} is already reduced, using as-is")
+        return inv(Y_full)
+    
+    # Otherwise perform the reduction
     mask = np.ones(Y_full.shape[0], bool)
     mask[slack_idx] = False
     Y_red = Y_full[np.ix_(mask, mask)]
@@ -145,19 +165,38 @@ def build_voltage_constraints(
     v_max: np.ndarray | None,
     *,
     slack_idx: int = -1,
+    already_reduced: bool = False,
     safety_factor: float = 1.02,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Two inequalities per non‑slack bus enforcing v_min ≤ v ≤ v_max.
+    
+    Parameters
+    ----------
+    Y_full : ndarray
+        The admittance matrix, which may already be reduced
+    v_min, v_max : ndarray or None
+        Voltage limits for non-slack buses
+    slack_idx : int
+        Index of slack bus to remove (if not already removed)
+    already_reduced : bool
+        If True, indicates Y_full already has slack bus removed
+    safety_factor : float
+        Safety factor for voltage constraints
     """
     if v_min is None or v_max is None:
-        return np.empty((0, Y_full.shape[0]-1)), np.empty(0)
+        return np.empty((0, Y_full.shape[0])), np.empty(0)
 
     v_min = np.asarray(v_min, float)
     v_max = np.asarray(v_max, float)
-    S     = _reduced_Y_inverse(Y_full, slack_idx)      # sensitivity
+    S = _reduced_Y_inverse(Y_full, slack_idx, already_reduced)  # Pass the flag
 
-    n = S.shape[0]
+    n = S.shape[0]  # Number of buses after potential reduction
+    
+    # Print diagnostic information
+    print(f"Voltage constraints: using sensitivity matrix of size {S.shape}")
+    print(f"v_min shape: {v_min.shape}, v_max shape: {v_max.shape}, expected: {n}")
+    
     if v_min.shape != (n,) or v_max.shape != (n,):
         raise ValueError("v_min/v_max must match #non‑slack buses")
 
@@ -187,6 +226,7 @@ def build_A_b_full(
     current_method: Literal["linf", "ols"] = "linf",
     current_kwargs: dict | None = None,
     slack_idx: int = -1,
+    already_reduced: bool = False,  # Add this parameter
     verbose: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
@@ -239,6 +279,9 @@ def build_A_b_full(
     slack_idx : int, default -1
         Index of the slack bus in ``Y_full`` (negative values are Pythonic).
 
+    already_reduced : bool, default False
+        If True, indicates Y_full already has slack bus removed
+
     verbose : bool, default False
         If True, prints per‑branch residuals / margins while fitting.
 
@@ -277,7 +320,8 @@ def build_A_b_full(
 
     A_V, b_V = build_voltage_constraints(
         Y_full, v_min, v_max,
-        slack_idx=slack_idx
+        slack_idx=slack_idx,
+        already_reduced=already_reduced  # Pass the flag
     )
 
     A = np.vstack((A_I, A_V))
@@ -290,23 +334,10 @@ def build_A_b_full(
 # 5.  Convenience wrappers reproducing earlier functions
 # ---------------------------------------------------------------------
 
-def build_A_b_linf(
-    X, I, rates,
-    Y_full=None, v_min=None, v_max=None,
-    **kw
-):
-    return build_A_b_full(
-        X, I, rates,
-        Y_full if Y_full is not None else np.eye(X.shape[1]+1),  # dummy
-        v_min=v_min, v_max=v_max,
-        current_method="linf",
-        current_kwargs=kw
-    )
-
-
 def build_A_b_ols(
     X, I, rates,
     Y_full=None, v_min=None, v_max=None,
+    already_reduced=True,  # Changed default to True to match real usage pattern
     **kw
 ):
     """OLS + margin for currents; voltages optional."""
@@ -314,6 +345,24 @@ def build_A_b_ols(
         X, I, rates,
         Y_full if Y_full is not None else np.eye(X.shape[1]+1),
         v_min=v_min, v_max=v_max,
+        already_reduced=already_reduced,  # Pass the flag
         current_method="ols",
+        current_kwargs=kw
+    )
+
+
+def build_A_b_linf(
+    X, I, rates,
+    Y_full=None, v_min=None, v_max=None,
+    already_reduced=True,  # Changed default to True for consistency
+    **kw
+):
+    """L∞ regression for currents; voltages optional."""
+    return build_A_b_full(
+        X, I, rates,
+        Y_full if Y_full is not None else np.eye(X.shape[1]+1),  # dummy
+        v_min=v_min, v_max=v_max,
+        already_reduced=already_reduced,  # Pass the flag
+        current_method="linf",
         current_kwargs=kw
     )

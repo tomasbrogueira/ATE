@@ -1,5 +1,6 @@
 import numpy as np
 import itertools
+import matplotlib.pyplot as plt
 
 from region_finder import (
     simulate_full_grid,simulate_full_grid_random_currents, build_A_b_from_Y, filter_feasible_points, calculate_axis_aligned_bounds,
@@ -7,17 +8,42 @@ from region_finder import (
     filter_contained_rectangles, calculate_focused_bounds, generate_improved_rectangles
 )
 from hexagonal_test import generate_hexagonal_prism_points, get_hexagonal_prism_polytope
-from plots import plot_time_series, plot_feasible_region, plot_feasible_region_3d
+from plots import plot_time_series, plot_region
+from constrain_builder import build_A_b_linf, build_A_b_ols
 
-
-def kyte_grid(rates=[0.5, 1.0, 0.25, 0.75, 0.6], n_points=5000, n_rectangles=500, 
+def kyte_grid(rates=[0.5, 1.0, 0.25, 0.75, 0.6], v_min=[-5.0, -5.0, -5.0, -5.0], v_max=[5.0, 5.0, 5.0, 5.0], n_points=5000, n_rectangles=500, 
               use_polytope_sampling=True, dims=[0, 1, 2], variance=0.5):
+    # Get data from simulation - note Y is already reduced (slack bus removed)
     injections, branch_currents, Y, branch_list = simulate_full_grid_random_currents(m=n_points, seed=98, variance=variance)
     X_all = injections.T
     
+    # Check for dimensions with low variation
+    if dims[2] is not None and injections.shape[0] > dims[2]:
+        flat_dim = np.abs(injections[dims[2], :].max() - injections[dims[2], :].min()) < 1e-6
+        if flat_dim:
+            print(f"\nWARNING: Dimension {dims[2]} is flat (no variation)")
+            variations = [np.var(injections[i, :]) for i in range(injections.shape[0])]
+            alt_dims = np.argsort(variations)[::-1][:3]  # Top 3 dimensions with most variation
+            print(f"Suggested dimensions with most variation: {alt_dims}")
+    
     plot_time_series(branch_currents, rates, "Branch Current")
     
-    A, b = build_A_b_from_Y(Y, branch_list, rates)
+    branch_currents_array = np.column_stack([branch_currents[key] for key in branch_currents.keys()])
+    
+    num_non_slack_buses = Y.shape[0]
+    print(f"System has {num_non_slack_buses} non-slack buses")
+    
+    # Validate voltage limit vectors
+    if len(v_min) != num_non_slack_buses or len(v_max) != num_non_slack_buses:
+        raise ValueError(f"Voltage limit arrays must have length {num_non_slack_buses} "
+                         f"(provided: v_min={len(v_min)}, v_max={len(v_max)})")
+    
+    # Build constraints with both current and voltage limits
+    A, b = build_A_b_ols(
+        X_all, branch_currents_array, rates, 
+        Y_full=Y, v_min=v_min, v_max=v_max,
+        already_reduced=True
+    )
     X_hist, k = filter_feasible_points(injections, A, b)
     print(f"Simulated {X_all.shape[0]} points; {k} are feasible.")
     
@@ -31,6 +57,7 @@ def kyte_grid(rates=[0.5, 1.0, 0.25, 0.75, 0.6], n_points=5000, n_rectangles=500
     X_sub = X_hist[:, dims]
     A_sub = A[:, dims]
 
+    # Find candidate rectangles using different methods
     candidates = []
     if use_polytope_sampling:
         try:
@@ -73,7 +100,6 @@ def kyte_grid(rates=[0.5, 1.0, 0.25, 0.75, 0.6], n_points=5000, n_rectangles=500
         return
 
     best_idx, (best_lo, best_hi), best_count = find_best_rectangle(X_sub, candidates)
-
     print(f"Best hyperrectangle covers {best_count}/{k} points.")
 
     lo_vis = np.where(np.isfinite(true_lo), true_lo, X_hist.min(axis=0))
@@ -81,14 +107,75 @@ def kyte_grid(rates=[0.5, 1.0, 0.25, 0.75, 0.6], n_points=5000, n_rectangles=500
     lo_vis[dims] = best_lo
     hi_vis[dims] = best_hi
 
-    plot_feasible_region_3d(X_hist, lo_vis, hi_vis, dims_to_plot=dims)
+    # Plot 3D region with the best rectangle
+    if X_hist.shape[1] >= 3 and len(dims) >= 3:
+        # Create 3D subset from the original data
+        X_3d = X_hist[:, dims[:3]]
+        
+        # Ensure the rectangle is truly 3D
+        best_lo_3d = np.zeros(3) 
+        best_hi_3d = np.zeros(3)
+        
+        # For each dimension in the 3D plot
+        for i in range(3):
+            # Map from plot dimension to original dimension index
+            orig_dim_idx = dims.index(dims[:3][i]) if dims[:3][i] in dims else i
+            # Get the corresponding bounds from best_lo/hi
+            if orig_dim_idx < len(best_lo):
+                best_lo_3d[i] = best_lo[orig_dim_idx]
+                best_hi_3d[i] = best_hi[orig_dim_idx]
+        
+        # Create the plot with only the original data points
+        print("\nPreparing interactive 3D plot...")
+        plot_region(
+            dims=(0, 1, 2),
+            pts=X_3d,
+            poly_eq=(A_sub, b),
+            rects_from_pts=[(best_lo_3d, best_hi_3d)],
+            labels={'poly_eq': 'Feasible region', 
+                   'poly_hull': 'Points convex hull',
+                   'rect_pts': 'Best rectangle'},
+            view_elevation=30,
+            view_azimuth=45,
+            show=True,
+            interactive=True
+        )
+    else:
+        # Fall back to 2D plot
+        if X_hist.shape[1] >= 2 and len(dims) >= 2:
+            plot_dims = tuple(dims[:2])
+            plot_lo = best_lo[:2]
+            plot_hi = best_hi[:2]
+            plot_region(
+                dims=plot_dims,
+                pts=X_hist,
+                poly_eq=(A, b),
+                rects_from_pts=[(plot_lo, plot_hi)],
+                labels={'poly_eq': 'Feasible region', 'poly_hull': 'Points convex hull', 
+                        'rect_pts': 'Best rectangle'},
+                show=True
+            )
 
-    for pair in itertools.combinations(dims, 2):
+    # Plot 2D projections
+    valid_dims = min(X_hist.shape[1], len(dims))
+    valid_dims_indices = dims[:valid_dims]
+    
+    for pair in itertools.combinations(valid_dims_indices, 2):
         i, j = pair
+        i_idx = valid_dims_indices.index(i)
+        j_idx = valid_dims_indices.index(j)
+        
         X2 = X_hist[:, [i, j]]
-        lo2 = best_lo[[dims.index(i), dims.index(j)]]
-        hi2 = best_hi[[dims.index(i), dims.index(j)]]
-        plot_feasible_region(X2, lo2, hi2, pair)
+        lo2 = best_lo[[i_idx, j_idx]]
+        hi2 = best_hi[[i_idx, j_idx]]
+        
+        plot_region(
+            dims=(0, 1),
+            pts=X2,
+            rects_from_pts=[(lo2, hi2)],
+            labels={'poly_hull': 'Points projection', 'rect_pts': 'Best rectangle'},
+            show=True
+        )
 
 
 def hexagonal_prism_grid(use_polytope_sampling=True, num_points=500, num_rectangles=500, seed=42):
@@ -128,21 +215,37 @@ def hexagonal_prism_grid(use_polytope_sampling=True, num_points=500, num_rectang
     best_rect_idx, (best_lower, best_upper), points_covered = find_best_rectangle(data, candidates)
     print(f"Best rectangle covers {points_covered}/{len(data)} points.")
 
+    # Plot 3D visualization if applicable
     if data.shape[1] >= 3:
-        plot_feasible_region_3d(data, best_lower, best_upper)
+        plot_region(
+            dims=tuple(range(min(3, data.shape[1]))), 
+            pts=data,
+            poly_eq=(A_p, b_p),
+            rects_from_pts=[(best_lower, best_upper)],
+            labels={'poly_eq': 'Hexagonal prism', 'poly_hull': 'Points convex hull', 
+                    'rect_pts': 'Best rectangle'},
+            show=True
+        )
     
+    # Plot 2D projections
     for projection_dims in itertools.combinations(range(data.shape[1]), 2):
         projected_data = data[:, list(projection_dims)]
         proj_lower = best_lower[list(projection_dims)]
         proj_upper = best_upper[list(projection_dims)]
-        plot_feasible_region(projected_data, proj_lower, proj_upper, projection_dims)
+        
+        plot_region(
+            dims=projection_dims,
+            pts=projected_data,
+            rects_from_pts=[(proj_lower, proj_upper)],
+            labels={'poly_hull': 'Points projection', 'rect_pts': 'Best rectangle projection'},
+            show=True
+        )
 
     return best_lower, best_upper, points_covered
 
 
 if __name__ == "__main__":
-    # hexagonal_prism_grid(use_polytope_sampling=True, num_points=5000, num_rectangles=5000, seed=42)
-
-    # loop for variances
-    for variance in [0.1, 0.5, 1.0]:
-        kyte_grid(rates=[0.5, 1.0, 0.75, 40, 40], n_points=10000, n_rectangles=10000, variance=variance)
+    # Loop for different variances
+    for variance in [0.1, 0.5, 1.0, 10.0, 100.0, 1000.0]:
+        print(f"Running kyte_grid with variance={variance}")
+        kyte_grid(rates=[0.5, 1.0, 0.75, 40, 40], n_points=1000, n_rectangles=1000, variance=variance)
